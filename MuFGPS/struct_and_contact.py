@@ -1,4 +1,19 @@
-
+# [ADDED] """
+# [ADDED] struct_and_contact.py
+# [ADDED]
+# [ADDED] This script extracts secondary structure statistics using DSSP and
+# [ADDED] residue-level Cα–Cα contact maps from PDB structures. The DSSP-derived
+# [ADDED] features are saved to SEC_FEAT_CSV, and the contact maps are saved
+# [ADDED] as compressed NumPy archives in CONTACT_DIR.
+# [ADDED]
+# [ADDED] Usage:
+# [ADDED]     python struct_and_contact.py
+# [ADDED]
+# [ADDED] Requirements:
+# [ADDED]     - PDB files in PDB_DIR, named as <id>.pdb
+# [ADDED]     - A FASTA file (FASTA_FILE) for optional ID cross-checking
+# [ADDED]     - BASIC_FEATURES_CSV with at least an 'id' column
+# [ADDED] """
 import os
 import warnings
 import numpy as np
@@ -19,12 +34,35 @@ def normalize_id(x: str) -> str:
     return os.path.splitext(b)[0]
 
 def dssp_secondary(pdb_path: str):
+    """
+    Compute DSSP-based secondary structure statistics for a PDB structure.
 
+    The function runs DSSP on the first model of the structure and counts:
+        - helix residues (H, G, I)
+        - sheet residues (E, B)
+        - turn residues (T)
+
+    Fractions are computed relative to the total number of residues with DSSP
+    assignments.
+
+    Parameters
+    ----------
+    pdb_path : str
+        Path to a PDB file.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+            - n_dssp: number of residues with DSSP records
+            - helix_cnt, sheet_cnt, turn_cnt
+            - helix_frac, sheet_frac, turn_frac
+    """
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("x", pdb_path)
     model = list(structure)[0]
 
-
+    # Use external DSSP binary if provided, otherwise Bio.PDB's default
     if DSSP_BIN:
         dssp = DSSP(model, pdb_path, dssp=DSSP_BIN)
     else:
@@ -49,10 +87,30 @@ def dssp_secondary(pdb_path: str):
     return out
 
 def ca_contact_map(pdb_path: str, thr=8.0) -> np.ndarray:
+    """
+    Compute a binary Cα–Cα contact map from a PDB structure.
 
+    Contacts are defined between pairs of Cα atoms whose Euclidean distance
+    is less than the given threshold (in Ångström). The diagonal is set to 0.
+
+    Parameters
+    ----------
+    pdb_path : str
+        Path to a PDB file.
+    thr : float, optional
+        Distance threshold (in Å) for defining contacts.
+
+    Returns
+    -------
+    numpy.ndarray
+        Binary adjacency matrix of shape (N, N), where N is the number of
+        residues with Cα atoms.
+    """
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("x", pdb_path)
     model = list(structure)[0]
+
+  # Collect Cα coordinates for all residues in the model
     cas = []
     for chain in model:
         for res in chain:
@@ -64,8 +122,11 @@ def ca_contact_map(pdb_path: str, thr=8.0) -> np.ndarray:
     if coords.shape[0] > MAX_SEQ_LEN_WARN:
         print(f"[Warn] very long protein ({coords.shape[0]} residues): {pdb_path}")
 
+   # Compute pairwise squared distances
     diff = coords[:, None, :] - coords[None, :, :]
     dist2 = np.sum(diff * diff, axis=-1)
+  
+   # Build adjacency matrix based on distance threshold
     adj = (dist2 < (thr * thr)).astype(np.uint8)
     np.fill_diagonal(adj, 0)
     return adj
@@ -112,3 +173,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
