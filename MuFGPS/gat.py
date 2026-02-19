@@ -1,4 +1,3 @@
-
 import os
 import numpy as np
 import pandas as pd
@@ -10,6 +9,8 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATv2Conv, global_max_pool
 from sklearn.model_selection import StratifiedShuffleSplit
+import torch.nn.functional as F 
+
 from config import (
     BASIC_FEATURES_CSV, CONTACT_DIR, EMBED_DIR, SPLIT_CSV, GAT_CKPT, GAT_FEAT_CSV,
     EMBED_DIM, GAT_HIDDEN, GAT_OUT_DIM, HEADS, DROPOUT, LEAKY_NEG_SLOPE,
@@ -24,8 +25,6 @@ def norm_id(x: str) -> str:
     return os.path.basename(str(x)).split()[0].split("|")[0]
 
 def load_graph(pid: str):
-
-
     cpath = os.path.join(CONTACT_DIR, f"{pid}.npz")
     epath = os.path.join(EMBED_DIR, f"{pid}.npz")
     if not (os.path.isfile(cpath) and os.path.isfile(epath)):
@@ -74,18 +73,113 @@ class GATNet(nn.Module):
         self.g3 = GATv2Conv(GAT_HIDDEN * HEADS[1], GAT_OUT_DIM, heads=HEADS[2],
                             concat=False, dropout=DROPOUT)
         self.act = nn.LeakyReLU(LEAKY_NEG_SLOPE)
-        self.cls = nn.Linear(GAT_OUT_DIM, 2)
         self.dropout = nn.Dropout(DROPOUT)
+
+        self.proj = nn.Sequential(
+            nn.Linear(GAT_OUT_DIM, GAT_OUT_DIM),
+            nn.ReLU(),
+            nn.Linear(GAT_OUT_DIM, GAT_OUT_DIM)
+        )
+
 
     def forward(self, x, edge_index, batch):
         x = self.act(self.g1(x, edge_index))
         x = self.dropout(x)
         x = self.act(self.g2(x, edge_index))
         x = self.dropout(x)
-        x = self.g3(x, edge_index)  # [N, 128]
-        g = global_max_pool(x, batch)  # [B, 128]
-        logits = self.cls(g)
-        return logits, g
+        x = self.g3(x, edge_index) 
+        g = global_max_pool(x, batch)  
+
+        z = self.proj(g)  
+        return g, z
+
+
+def augment_graph(x, edge_index, edge_drop_p=0.2, node_mask_p=0.1):
+    
+    if edge_drop_p > 0.0 and edge_index.size(1) > 0:
+        num_edges = edge_index.size(1)
+        keep_mask = torch.rand(num_edges, device=edge_index.device) > edge_drop_p
+        edge_index = edge_index[:, keep_mask]
+
+ 
+    if node_mask_p > 0.0 and x.size(0) > 0:
+        num_nodes = x.size(0)
+        mask = torch.rand(num_nodes, device=x.device) < node_mask_p
+        x = x.clone()
+        x[mask] = 0.0
+
+    return x, edge_index
+
+
+def contrastive_loss(z1, z2, temperature=0.2):
+    z1 = F.normalize(z1, dim=1)
+    z2 = F.normalize(z2, dim=1)
+    N = z1.size(0)
+    z = torch.cat([z1, z2], dim=0)  
+
+    sim = torch.matmul(z, z.t()) / temperature 
+    mask = torch.eye(2 * N, dtype=torch.bool, device=z.device)
+    sim = sim.masked_fill(mask, -1e9)  
+
+   
+    pos_idx = torch.arange(N, 2 * N, device=z.device)
+    labels = torch.cat([pos_idx, torch.arange(0, N, device=z.device)], dim=0)
+    loss = F.cross_entropy(sim, labels)
+    return loss
+
+
+def train_one_epoch(model, loader, optim):
+    model.train()
+    total = 0.0
+    for batch in loader:
+        batch = batch.to(device)
+        optim.zero_grad()
+
+      
+        x1, e1 = augment_graph(batch.x, batch.edge_index)
+        x2, e2 = augment_graph(batch.x, batch.edge_index)
+
+        _, z1 = model(x1, e1, batch.batch)
+        _, z2 = model(x2, e2, batch.batch)
+
+        loss = contrastive_loss(z1, z2)
+        loss.backward()
+        optim.step()
+        total += float(loss) * batch.num_graphs
+    return total / len(loader.dataset)
+
+
+@torch.no_grad()
+def eval_loss(model, loader):
+    model.eval()
+    total = 0.0
+    for batch in loader:
+        batch = batch.to(device)
+
+        x1, e1 = augment_graph(batch.x, batch.edge_index)
+        x2, e2 = augment_graph(batch.x, batch.edge_index)
+
+        _, z1 = model(x1, e1, batch.batch)
+        _, z2 = model(x2, e2, batch.batch)
+
+        loss = contrastive_loss(z1, z2)
+        total += float(loss) * batch.num_graphs
+    return total / len(loader.dataset)
+
+@torch.no_grad()
+def extract_features(model, loader):
+    model.eval()
+    feats = []
+    pids = []
+    ys = []
+    for batch in loader:
+        batch = batch.to(device)
+        g, _ = model(batch.x, batch.edge_index, batch.batch)  
+        feats.append(g.cpu().numpy())
+        pids.extend(batch.pid)
+        ys.extend(batch.y.view(-1).cpu().numpy())
+    X = np.vstack(feats)
+    return pids, ys, X
 
 def get_split(df):
     if "split" in df.columns:
@@ -101,51 +195,13 @@ def get_split(df):
     print(f"[OK] split saved -> {SPLIT_CSV}")
     return dd
 
-def train_one_epoch(model, loader, optim, criterion):
-    model.train()
-    total = 0.0
-    for batch in loader:
-        batch = batch.to(device)
-        optim.zero_grad()
-        logits, _ = model(batch.x, batch.edge_index, batch.batch)
-        loss = criterion(logits, batch.y.view(-1))
-        loss.backward()
-        optim.step()
-        total += float(loss) * batch.num_graphs
-    return total / len(loader.dataset)
-
-@torch.no_grad()
-def eval_loss(model, loader, criterion):
-    model.eval()
-    total = 0.0
-    for batch in loader:
-        batch = batch.to(device)
-        logits, _ = model(batch.x, batch.edge_index, batch.batch)
-        loss = criterion(logits, batch.y.view(-1))
-        total += float(loss) * batch.num_graphs
-    return total / len(loader.dataset)
-
-@torch.no_grad()
-def extract_features(model, loader):
-    model.eval()
-    feats = []
-    pids = []
-    ys = []
-    for batch in loader:
-        batch = batch.to(device)
-        _, g = model(batch.x, batch.edge_index, batch.batch)
-        feats.append(g.cpu().numpy())
-        pids.extend(batch.pid)
-        ys.extend(batch.y.view(-1).cpu().numpy())
-    X = np.vstack(feats)
-    return pids, ys, X
-
 def main():
     df = pd.read_csv(BASIC_FEATURES_CSV)
     assert {"id","label"}.issubset(df.columns)
     split_df = get_split(df)
     tr = split_df[split_df["split"]=="train"]
     te = split_df[split_df["split"]=="test"]
+
     train_set = GraphSet(tr["id"].apply(norm_id).tolist(), tr["label"].tolist())
     test_set  = GraphSet(te["id"].apply(norm_id).tolist(), te["label"].tolist())
 
@@ -153,15 +209,15 @@ def main():
     test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE, shuffle=False)
 
     model = GATNet().to(device)
-    optim = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    criterion = nn.CrossEntropyLoss()
+    optim = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)  
+    
 
     best_loss = 1e9
     patience = PATIENCE
     for epoch in range(1, EPOCHS+1):
-        tr_loss = train_one_epoch(model, train_loader, optim, criterion)
-        te_loss = eval_loss(model, test_loader, criterion)
-        print(f"Epoch {epoch:03d} | train {tr_loss:.4f} | test {te_loss:.4f}")
+        tr_loss = train_one_epoch(model, train_loader, optim) 
+        te_loss = eval_loss(model, test_loader)               
+        print(f"Epoch {epoch:03d} | train {tr_loss:.4f} | val {te_loss:.4f}")
         if te_loss < best_loss - 1e-4:
             best_loss = te_loss
             patience = PATIENCE
@@ -173,8 +229,8 @@ def main():
                 break
     print(f"[OK] best model saved -> {GAT_CKPT}")
 
-
     model.load_state_dict(torch.load(GAT_CKPT, map_location=device))
+
     all_ids = split_df["id"].apply(norm_id).tolist()
     all_labels = split_df["label"].tolist()
     all_set = GraphSet(all_ids, all_labels)
