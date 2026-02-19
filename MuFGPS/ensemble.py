@@ -1,3 +1,12 @@
+# [ADDED] """
+# [ADDED] ensemble.py
+# [ADDED] 
+# [ADDED] This script implements the stacking-based ensemble classifier for the MuFGPS framework.
+# [ADDED] It loads pre-computed sequence, secondary structure, and GAT-based structural features,
+# [ADDED] applies SMOTE oversampling on the training set, trains a stacking ensemble
+# [ADDED] (Random Forest + XGBoost + LightGBM with logistic regression as meta-learner),
+# [ADDED] evaluates the model, and saves metrics and ROC/PR curves.
+# [ADDED] """
 
 import os
 import argparse
@@ -28,6 +37,24 @@ from config import (
 )
 
 def prepare_data():
+      """
+    Prepare merged training and test feature tables.
+
+    This function:
+        1. Loads basic sequence-level features, DSSP-based secondary structure features,
+           and GAT-based structural embeddings.
+        2. Merges them by protein ID.
+        3. Splits the merged table into train / test according to SPLIT_CSV.
+        4. Fills missing numeric values with column-wise medians.
+        5. Saves the merged train/test tables for reproducibility.
+
+    Returns
+    -------
+    train : pandas.DataFrame
+        Merged training set with columns [id, label, feature_1, ..., feature_n].
+    test : pandas.DataFrame
+        Merged test set with the same structure as `train`.
+    """
     base = pd.read_csv(BASIC_FEATURES_CSV)
     sec  = pd.read_csv(SEC_FEAT_CSV)
     gat  = pd.read_csv(GAT_FEAT_CSV)
@@ -53,11 +80,39 @@ def prepare_data():
     return train, test
 
 def split_xy(df):
+      """
+    Split a merged DataFrame into feature matrix X and label vector y.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing at least the columns 'id' and 'label', and feature columns.
+
+    Returns
+    -------
+    X : numpy.ndarray
+        Feature matrix of shape (n_samples, n_features).
+    y : numpy.ndarray
+        Label vector of shape (n_samples,).
+    """
+  
     y = df["label"].values.astype(int)
     X = df.drop(columns=["id","label"]).values.astype(float)
     return X, y
 
 def plot_curves(y_true, prob, out_prefix):
+      """
+    Plot ROC and precision-recall curves and save them as PNG files.
+
+    Parameters
+    ----------
+    y_true : numpy.ndarray
+        Ground-truth binary labels.
+    prob : numpy.ndarray
+        Predicted positive class probabilities.
+    out_prefix : str
+        Prefix used for naming the output PNG files.
+    """
     fpr, tpr, _ = roc_curve(y_true, prob)
     prec, rec, _ = precision_recall_curve(y_true, prob)
 
@@ -76,6 +131,7 @@ def plot_curves(y_true, prob, out_prefix):
     plt.close()
 
 def main():
+#  Main entry point for training and evaluating the stacking ensemble.
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--sampling_strategy", type=str, default=str(SMOTE_PARAMS["sampling_strategy"]))
@@ -153,3 +209,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
