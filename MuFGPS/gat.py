@@ -1,3 +1,21 @@
+# [ADDED] """
+# [ADDED] gat.py
+# [ADDED]
+# [ADDED] This script trains a Graph Attention Network (GAT) on residue-level
+# [ADDED] contact graphs derived from AlphaFold models, using a self-supervised
+# [ADDED] contrastive learning objective. The trained GAT encoder is then used
+# [ADDED] to extract graph-level structural embeddings for each protein, which
+# [ADDED] are exported to a CSV file (GAT_FEAT_CSV) and later used as structural
+# [ADDED] features in the MuFGPS framework.
+# [ADDED]
+# [ADDED] Usage:
+# [ADDED]     python gat.py
+# [ADDED]
+# [ADDED] Requirements:
+# [ADDED]     - Precomputed residue contact matrices in CONTACT_DIR (one .npz per protein).
+# [ADDED]     - Precomputed per-residue embeddings in EMBED_DIR (e.g., language model embeddings).
+# [ADDED]     - BASIC_FEATURES_CSV containing at least columns ['id', 'label'].
+# [ADDED] """
 import os
 import numpy as np
 import pandas as pd
@@ -22,17 +40,51 @@ torch.manual_seed(RANDOM_SEED)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def norm_id(x: str) -> str:
+        """
+    Normalize protein identifiers.
+
+    This function extracts a clean protein ID from various possible ID formats
+    (e.g., stripping path, whitespace, or '|' separated fields).
+
+    Parameters
+    ----------
+    x : str
+        Raw identifier string.
+
+    Returns
+    -------
+    str
+        Normalized protein ID.
+    """
     return os.path.basename(str(x)).split()[0].split("|")[0]
 
 def load_graph(pid: str):
+        """
+    Load a residue-level contact graph and corresponding node features for a protein.
+
+    Parameters
+    ----------
+    pid : str
+        Normalized protein ID.
+
+    Returns
+    -------
+    torch_geometric.data.Data or None
+        A PyG Data object containing:
+            - x: node feature matrix (num_nodes, EMBED_DIM)
+            - edge_index: undirected edge index based on the contact map
+        Returns None if either contact or embedding file is missing.
+    """
     cpath = os.path.join(CONTACT_DIR, f"{pid}.npz")
     epath = os.path.join(EMBED_DIR, f"{pid}.npz")
     if not (os.path.isfile(cpath) and os.path.isfile(epath)):
         return None
 
+# Load adjacency matrix (contact map) and per-residue embeddings
     adj = np.load(cpath)["adj"].astype(np.uint8)
     x = np.load(epath)["x"].astype(np.float32)
 
+# Ensure that the adjacency matrix and the features are aligned in terms of the number of nodes.
     n = min(adj.shape[0], x.shape[0])
     if n < adj.shape[0]:
         adj = adj[:n, :n]
@@ -46,6 +98,17 @@ def load_graph(pid: str):
     return data
 
 class GraphSet(Dataset):
+    """
+    Dataset wrapper for a collection of protein graphs.
+
+    Each item corresponds to one protein graph with:
+        - residue-level node features
+        - residue contact edges
+        - graph-level label (LLPS vs non-LLPS)
+
+    Graphs that cannot be constructed (e.g., missing contact/embedding files)
+    are skipped.
+    """
     def __init__(self, ids, labels):
         self.ids = ids
         self.labels = labels
@@ -63,6 +126,19 @@ class GraphSet(Dataset):
     def __getitem__(self, i): return self.items[i]
 
 class GATNet(nn.Module):
+    """
+    Graph Attention Network encoder for protein contact graphs.
+
+    Architecture:
+        - Three GATv2Conv layers with multi-head attention.
+        - Global max pooling to obtain graph-level representation.
+        - A small projection MLP on top of the pooled embedding for
+          contrastive learning.
+
+    The model returns:
+        - g: pooled graph-level embedding
+        - z: projected embedding used in the contrastive objective
+    """
     def __init__(self):
         super().__init__()
         self.g1 = GATv2Conv(EMBED_DIM, GAT_HIDDEN, heads=HEADS[0],
@@ -83,6 +159,25 @@ class GATNet(nn.Module):
 
 
     def forward(self, x, edge_index, batch):
+            """
+        Forward pass of the GAT encoder.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Node feature matrix of shape (num_nodes, EMBED_DIM).
+        edge_index : torch.Tensor
+            Edge indices of shape (2, num_edges).
+        batch : torch.Tensor
+            Batch vector that maps each node to its graph index.
+
+        Returns
+        -------
+        g : torch.Tensor
+            Graph-level embedding after global pooling.
+        z : torch.Tensor
+            Projected embedding used for contrastive learning.
+        """
         x = self.act(self.g1(x, edge_index))
         x = self.dropout(x)
         x = self.act(self.g2(x, edge_index))
@@ -95,13 +190,39 @@ class GATNet(nn.Module):
 
 
 def augment_graph(x, edge_index, edge_drop_p=0.2, node_mask_p=0.1):
-    
+    """
+    Perform simple graph augmentations for contrastive learning.
+
+    Two types of augmentations are applied:
+        1. Edge dropout: randomly drop a subset of edges.
+        2. Node feature masking: randomly mask (zero-out) a subset of node features.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Node feature matrix.
+    edge_index : torch.Tensor
+        Edge index of the graph.
+    edge_drop_p : float, optional
+        Probability of dropping each edge.
+    node_mask_p : float, optional
+        Probability of masking each node.
+
+    Returns
+    -------
+    x_aug : torch.Tensor
+        Augmented node feature matrix.
+    edge_index_aug : torch.Tensor
+        Augmented edge index.
+    """
+
+    # Edge dropout   
     if edge_drop_p > 0.0 and edge_index.size(1) > 0:
         num_edges = edge_index.size(1)
         keep_mask = torch.rand(num_edges, device=edge_index.device) > edge_drop_p
         edge_index = edge_index[:, keep_mask]
 
- 
+     # Node feature masking
     if node_mask_p > 0.0 and x.size(0) > 0:
         num_nodes = x.size(0)
         mask = torch.rand(num_nodes, device=x.device) < node_mask_p
@@ -112,6 +233,28 @@ def augment_graph(x, edge_index, edge_drop_p=0.2, node_mask_p=0.1):
 
 
 def contrastive_loss(z1, z2, temperature=0.2):
+    """
+    Compute a simple contrastive loss between two augmented views.
+
+    The embeddings from two augmented views (z1, z2) of the same batch are
+    treated as positive pairs, while all other pairs within the batch are
+    treated as negatives. A temperature-scaled cosine similarity matrix is
+    used as logits for a cross-entropy loss.
+
+    Parameters
+    ----------
+    z1 : torch.Tensor
+        Projected embeddings from the first view, shape (N, d).
+    z2 : torch.Tensor
+        Projected embeddings from the second view, shape (N, d).
+    temperature : float, optional
+        Temperature scaling factor.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar contrastive loss.
+    """
     z1 = F.normalize(z1, dim=1)
     z2 = F.normalize(z2, dim=1)
     N = z1.size(0)
@@ -168,6 +311,25 @@ def eval_loss(model, loader):
 
 @torch.no_grad()
 def extract_features(model, loader):
+    """
+    Extract graph-level embeddings for all proteins using the trained GAT encoder.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Trained GATNet model (encoder).
+    loader : DataLoader
+        DataLoader over GraphSet containing all proteins.
+
+    Returns
+    -------
+    pids : list of str
+        Protein IDs corresponding to each embedding.
+    ys : list of int
+        Labels (LLPS vs non-LLPS) for each protein.
+    X : numpy.ndarray
+        Graph-level embeddings of shape (n_proteins, GAT_OUT_DIM).
+    """
     model.eval()
     feats = []
     pids = []
@@ -182,6 +344,22 @@ def extract_features(model, loader):
     return pids, ys, X
 
 def get_split(df):
+    """
+    Obtain or create a train/test split based on BASIC_FEATURES_CSV.
+
+    If a 'split' column already exists, it is reused. Otherwise, a new
+    stratified split is created and saved to SPLIT_CSV.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing at least 'id' and 'label' columns.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with columns ['id', 'label', 'split'].
+    """
     if "split" in df.columns:
         return df[["id", "label", "split"]]
     sss = StratifiedShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=RANDOM_SEED)
@@ -196,6 +374,9 @@ def get_split(df):
     return dd
 
 def main():
+"""
+    Main entry point for training the GAT encoder and exporting graph embeddings.
+"""
     df = pd.read_csv(BASIC_FEATURES_CSV)
     assert {"id","label"}.issubset(df.columns)
     split_df = get_split(df)
@@ -247,3 +428,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
