@@ -1,0 +1,10 @@
+numpy>=1.23
+pandas>=1.5
+scikit-learn>=1.2
+torch>=2.0
+torch-geometric>=2.3
+xgboost>=1.7
+lightgbm>=3.3
+imbalanced-learn>=0.10
+biopython>=1.80
+bio-embeddings>=0.2.0
