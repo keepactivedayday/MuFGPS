@@ -1,21 +1,3 @@
-"""
-config.py
-
-Central configuration file for the MuFGPS framework.
-
-This file defines:
-    - Project directories
-    - Data input paths
-    - Output paths
-    - Structural parameters
-    - GAT hyperparameters
-    - Training parameters
-    - SMOTE settings
-    - Ensemble classifier parameters
-
-All scripts import configuration variables from this file to ensure
-experimental consistency and reproducibility.
-"""
 
 import os
 
@@ -23,16 +5,11 @@ import os
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-
-
-
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-BASIC_FEATURES_CSV = os.path.join(DATA_DIR, "basic_features.csv")
-FASTA_FILE = os.path.join(DATA_DIR, "data.fasta")
-PDB_DIR = os.path.join(DATA_DIR, "protein_pdb")
-
-# Optional external DSSP executable (leave "" to use default)
+BASIC_FEATURES_CSV = os.path.join(DATA_DIR, "")
+FASTA_FILE = os.path.join(DATA_DIR, "")
+PDB_DIR = os.path.join(DATA_DIR, "")
 DSSP_BIN = ""
 
 
@@ -54,7 +31,6 @@ MERGED_TEST_CSV  = os.path.join(OUT_DIR, "test_merged.csv")
 RESULTS_DIR = os.path.join(OUT_DIR, "results")
 
 
-# Automatically create required directories
 for d in [
     OUT_DIR,
     CONTACT_DIR,
@@ -64,23 +40,12 @@ for d in [
 ]:
     os.makedirs(d, exist_ok=True)
 
-
-
-
-# Cα–Cα distance threshold (Å) for defining residue contacts
 CA_DIST_THRESHOLD = 8.0
 
-# Warn if protein sequence exceeds this length
 MAX_SEQ_LEN_WARN = 6000
-
-
-
 
 RANDOM_SEED = 42
 TEST_SIZE = 0.2
-
-
-
 
 EMBED_DIM = 1024          # Dimension of residue-level embeddings
 GAT_HIDDEN = 128          # Hidden layer size
@@ -90,16 +55,11 @@ GAT_OUT_DIM = 128         # Graph-level embedding dimension
 DROPOUT = 0.2
 LEAKY_NEG_SLOPE = 0.2
 
-
-
-
 EPOCHS = 200
 BATCH_SIZE = 8
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 PATIENCE = 6
-
-
 
 
 SMOTE_PARAMS = dict(
@@ -108,8 +68,6 @@ SMOTE_PARAMS = dict(
     n_jobs=1,
     random_state=RANDOM_SEED
 )
-
-
 
 
 RF_PARAMS = dict(
@@ -147,8 +105,6 @@ LGB_PARAMS = dict(
     reg_lambda=0.0,
     random_state=RANDOM_SEED
 )
-
-
 
 
 LOGREG_PARAMS = dict(
