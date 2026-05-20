@@ -20,16 +20,11 @@ experimental consistency and reproducibility.
 import os
 
 
-# ==========================================================
-# Project root
-# ==========================================================
+
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 
-# ==========================================================
-# Data paths
-# ==========================================================
 
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
@@ -41,9 +36,7 @@ PDB_DIR = os.path.join(DATA_DIR, "protein_pdb")
 DSSP_BIN = ""
 
 
-# ==========================================================
-# Output paths
-# ==========================================================
+
 
 OUT_DIR = os.path.join(BASE_DIR, "outputs")
 
@@ -72,9 +65,7 @@ for d in [
     os.makedirs(d, exist_ok=True)
 
 
-# ==========================================================
-# Structural feature parameters
-# ==========================================================
+
 
 # Cα–Cα distance threshold (Å) for defining residue contacts
 CA_DIST_THRESHOLD = 8.0
@@ -83,17 +74,13 @@ CA_DIST_THRESHOLD = 8.0
 MAX_SEQ_LEN_WARN = 6000
 
 
-# ==========================================================
-# Reproducibility & data split
-# ==========================================================
+
 
 RANDOM_SEED = 42
 TEST_SIZE = 0.2
 
 
-# ==========================================================
-# GAT architecture parameters
-# ==========================================================
+
 
 EMBED_DIM = 1024          # Dimension of residue-level embeddings
 GAT_HIDDEN = 128          # Hidden layer size
@@ -104,9 +91,7 @@ DROPOUT = 0.2
 LEAKY_NEG_SLOPE = 0.2
 
 
-# ==========================================================
-# GAT training hyperparameters
-# ==========================================================
+
 
 EPOCHS = 200
 BATCH_SIZE = 8
@@ -115,9 +100,7 @@ WEIGHT_DECAY = 1e-4
 PATIENCE = 6
 
 
-# ==========================================================
-# SMOTE parameters
-# ==========================================================
+
 
 SMOTE_PARAMS = dict(
     sampling_strategy="auto",
@@ -127,9 +110,7 @@ SMOTE_PARAMS = dict(
 )
 
 
-# ==========================================================
-# Base learners (Stacking ensemble)
-# ==========================================================
+
 
 RF_PARAMS = dict(
     n_estimators=200,
@@ -168,9 +149,7 @@ LGB_PARAMS = dict(
 )
 
 
-# ==========================================================
-# Meta-learner (Logistic Regression)
-# ==========================================================
+
 
 LOGREG_PARAMS = dict(
     C=1.0,
