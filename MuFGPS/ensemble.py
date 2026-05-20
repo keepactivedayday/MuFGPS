@@ -1,12 +1,3 @@
-# [ADDED] """
-# [ADDED] ensemble.py
-# [ADDED] 
-# [ADDED] This script implements the stacking-based ensemble classifier for the MuFGPS framework.
-# [ADDED] It loads pre-computed sequence, secondary structure, and GAT-based structural features,
-# [ADDED] applies SMOTE oversampling on the training set, trains a stacking ensemble
-# [ADDED] (Random Forest + XGBoost + LightGBM with logistic regression as meta-learner),
-# [ADDED] evaluates the model, and saves metrics and ROC/PR curves.
-# [ADDED] """
 
 import os
 import argparse
@@ -37,35 +28,17 @@ from config import (
 )
 
 def prepare_data():
-      """
-    Prepare merged training and test feature tables.
 
-    This function:
-        1. Loads basic sequence-level features, DSSP-based secondary structure features,
-           and GAT-based structural embeddings.
-        2. Merges them by protein ID.
-        3. Splits the merged table into train / test according to SPLIT_CSV.
-        4. Fills missing numeric values with column-wise medians.
-        5. Saves the merged train/test tables for reproducibility.
-
-    Returns
-    -------
-    train : pandas.DataFrame
-        Merged training set with columns [id, label, feature_1, ..., feature_n].
-    test : pandas.DataFrame
-        Merged test set with the same structure as `train`.
-    """
     base = pd.read_csv(BASIC_FEATURES_CSV)
     sec  = pd.read_csv(SEC_FEAT_CSV)
     gat  = pd.read_csv(GAT_FEAT_CSV)
     assert {"id","label"}.issubset(base.columns)
-    # 只保留 id,label + 其他特征
     keep = [c for c in base.columns if c not in {"split"}]
     base = base[keep]
 
-    # 合并
+
     m = base.merge(sec, on="id", how="left").merge(gat.drop(columns=["label"]), on="id", how="left")
-    # 缺失填充
+
     m = m.fillna(m.median(numeric_only=True))
 
     split = pd.read_csv(SPLIT_CSV)
@@ -74,45 +47,17 @@ def prepare_data():
     train = m[m["id"].isin(tr_ids)].copy()
     test  = m[m["id"].isin(te_ids)].copy()
 
-    # 保存一下拼接结果
+
     train.to_csv(MERGED_TRAIN_CSV, index=False)
     test.to_csv(MERGED_TEST_CSV, index=False)
     return train, test
 
 def split_xy(df):
-      """
-    Split a merged DataFrame into feature matrix X and label vector y.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing at least the columns 'id' and 'label', and feature columns.
-
-    Returns
-    -------
-    X : numpy.ndarray
-        Feature matrix of shape (n_samples, n_features).
-    y : numpy.ndarray
-        Label vector of shape (n_samples,).
-    """
-  
     y = df["label"].values.astype(int)
     X = df.drop(columns=["id","label"]).values.astype(float)
     return X, y
 
 def plot_curves(y_true, prob, out_prefix):
-      """
-    Plot ROC and precision-recall curves and save them as PNG files.
-
-    Parameters
-    ----------
-    y_true : numpy.ndarray
-        Ground-truth binary labels.
-    prob : numpy.ndarray
-        Predicted positive class probabilities.
-    out_prefix : str
-        Prefix used for naming the output PNG files.
-    """
     fpr, tpr, _ = roc_curve(y_true, prob)
     prec, rec, _ = precision_recall_curve(y_true, prob)
 
@@ -131,7 +76,6 @@ def plot_curves(y_true, prob, out_prefix):
     plt.close()
 
 def main():
-#  Main entry point for training and evaluating the stacking ensemble.
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--sampling_strategy", type=str, default=str(SMOTE_PARAMS["sampling_strategy"]))
@@ -192,7 +136,6 @@ def main():
     print(f"AUROC:   {auroc:.4f} | AUPRC:    {aupr:.4f}")
     print("\nClassification report:\n", classification_report(y_te, pred, digits=4))
 
-    # 保存结果
     os.makedirs(RESULTS_DIR, exist_ok=True)
     pd.DataFrame([dict(Accuracy=acc, Precision=pre, Recall=rec, F1=f1, MCC=mcc,
                        AUROC=auroc, AUPRC=aupr)]).to_csv(
