@@ -1,7 +1,4 @@
-
 import os
-
-
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -11,8 +8,6 @@ BASIC_FEATURES_CSV = os.path.join(DATA_DIR, "")
 FASTA_FILE = os.path.join(DATA_DIR, "")
 PDB_DIR = os.path.join(DATA_DIR, "")
 DSSP_BIN = ""
-
-
 
 
 OUT_DIR = os.path.join(BASE_DIR, "outputs")
@@ -47,10 +42,10 @@ MAX_SEQ_LEN_WARN = 6000
 RANDOM_SEED = 42
 TEST_SIZE = 0.2
 
-EMBED_DIM = 1024          # Dimension of residue-level embeddings
-GAT_HIDDEN = 128          # Hidden layer size
-HEADS = [3, 3, 1]         # Attention heads per layer
-GAT_OUT_DIM = 128         # Graph-level embedding dimension
+EMBED_DIM = 1024          
+GAT_HIDDEN = 128        
+HEADS = [3, 3, 1]        
+GAT_OUT_DIM = 128       
 
 DROPOUT = 0.2
 LEAKY_NEG_SLOPE = 0.2
